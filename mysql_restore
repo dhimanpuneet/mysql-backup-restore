@@ -1,0 +1,46 @@
+#!/bin/bash
+maxjobs=8
+
+# Configuration
+dbuser='root'
+dbpass='********'
+dbhost='localhost'
+dbport='3306'
+dir='/tmp'
+
+job() {
+  echo "Importing $4 to $3 on $1..."
+  mysql -h $1 -P $2 -u $5 -p$6 -N -B -e "truncate \`$3\`.\`$4\`"
+  mysql -h $1 -P $2 -u $5 -p$6 $3 <<EOFMYSQL
+LOAD DATA LOCAL INFILE "$dir/$3_$4_data" INTO TABLE \`$4\`
+EOFMYSQL
+}
+
+time_start=$(date +%s.%N)
+
+# Loop through list of tables
+for dbname in `mysql -h $dbhost -P $dbport $2 -u $dbuser -p$dbpass -N -B -e "show databases;"`;
+do
+  if [[ "$dbname" == 'mysql' || "$dbname" == 'information_schema' || "$dbname" == 'performance_schema' ]]; then
+    continue
+  fi
+  for dbtable in `mysql -h $dbhost -P $dbport -u $dbuser -p$dbpass -N -B -e "show tables from \\\`$dbname\\\`"`;
+  do
+    #wait until all jobs are complete
+    while [[ $(jobs -p | wc -l) -gt $maxjobs ]]
+    do
+      sleep 1
+    done
+    job $dbhost $dbport $dbname $dbtable $dbuser $dbpass &
+  done
+done
+
+wait
+
+time_end=$(date +%s.%N)
+time_elapsed=$(echo "$time_end - $time_start" | bc)
+
+echo "-- MySQL restore completed in $time_elapsed seconds"
+
+exit 0;
+
